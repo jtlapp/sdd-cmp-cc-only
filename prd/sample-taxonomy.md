@@ -1,0 +1,121 @@
+- Fiction
+  - Realist Fiction
+    - Contemporary Realism
+      - Domestic Fiction
+        - Family Drama
+        - Marriage Fiction
+        - Parent-Child Fiction
+      - Social Realism
+        - Workplace Fiction
+        - Class and Poverty Fiction
+        - Political Social Fiction
+      - Psychological Realism
+        - Interior Life Fiction
+        - Moral Crisis Fiction
+        - Identity Fiction
+    - Historical Fiction
+      - War Historical Fiction
+      - Court and Dynasty Fiction
+      - Revolution Fiction
+      - Historical Family Saga
+      - Fictionalized Biography
+    - Literary Fiction
+      - Philosophical Fiction
+      - Experimental Literary Fiction
+      - Character Study
+      - Social Observation Fiction
+  - Speculative Fiction
+    - Fantasy
+      - Epic Fantasy
+      - Quest Fantasy
+      - Sword and Sorcery
+      - Portal Fantasy
+      - Urban Fantasy
+      - Mythic Fantasy
+      - Fairy-Tale Retelling
+      - Fantasy of Manners
+    - Science Fiction
+      - Hard Science Fiction
+      - Engineering Science Fiction
+      - Space Opera
+      - First Contact
+      - Cyberpunk
+      - Dystopian Science Fiction
+      - Posthuman Fiction
+      - Time Travel Fiction
+    - Horror
+      - Ghost Story
+      - Supernatural Horror
+      - Cosmic Horror
+      - Creature Horror
+      - Psychological Horror
+      - Survival Horror
+      - Body Horror
+    - Reality-Bending Fiction
+      - Alternate History
+      - Secret History
+      - Magical Realism
+      - Slipstream
+      - Surreal Fiction
+      - Ontological Fiction
+  - Suspense and Discovery Fiction
+    - Mystery
+      - Detective Fiction
+      - Police Procedural
+      - Amateur Sleuth Mystery
+      - Cozy Mystery
+      - Locked-Room Mystery
+      - Noir
+      - Legal Mystery
+    - Thriller
+      - Psychological Thriller
+      - Domestic Thriller
+      - Spy Thriller
+      - Political Thriller
+      - Legal Thriller
+      - Medical Thriller
+      - Corporate Thriller
+      - Military Thriller
+    - Adventure
+      - Exploration Adventure
+      - Survival Adventure
+      - Treasure Hunt
+      - Swashbuckler
+      - Sea Adventure
+      - Frontier Adventure
+      - Rescue Mission
+  - Relationship Fiction
+    - Romance
+      - Contemporary Romance
+      - Historical Romance
+      - Romantic Comedy
+      - Paranormal Romance
+      - Fantasy Romance
+      - Science Fiction Romance
+    - Family Fiction
+      - Family Saga
+      - Generational Saga
+      - Inheritance Fiction
+      - Sibling Fiction
+      - Estrangement and Reunion Fiction
+    - Friendship and Community Fiction
+      - Found-Family Fiction
+      - Mentor-Bond Fiction
+      - Village Fiction
+      - Neighborhood Fiction
+      - Ensemble Community Fiction
+  - Comic and Satirical Fiction
+    - Comedy
+      - Farce
+      - Comedy of Manners
+      - Workplace Comedy
+      - Character Comedy
+      - Absurd Comedy
+      - Comic Adventure
+    - Satire
+      - Social Satire
+      - Political Satire
+      - Academic Satire
+      - Media Satire
+      - Bureaucratic Satire
+      - Speculative Satire
