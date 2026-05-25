@@ -12,8 +12,10 @@
 
 ## How we work
 - Work one phase at a time. Before coding a phase, read its brief and the PRD sections
-  it cites, and state a brief plan. If something in the spec is unclear or you'd have to
-  decide it yourself, say so rather than silently choosing.
+  it cites, and state a brief plan.
+- If a requirement is unclear or underdetermined when you go to build against it,
+  don't guess: note it and resolve it explicitly before relying on it, resolving from
+  `prd/prd.md`'s wording where it speaks.
 
 ## Testing
 - Each phase ships an automated test suite for the behavior it introduces, run by the
