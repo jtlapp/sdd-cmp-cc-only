@@ -159,6 +159,46 @@ export function detachChildFixture(parentId: TaxonId, childId: TaxonId): void {
   }
 }
 
+/**
+ * Remove a taxon entirely: drop it from the taxa map, remove every edge
+ * referencing it (from parents' childIds and from children's parents-of
+ * sets), and drop its own parents-of entry. No-op on unknown id.
+ *
+ * Used by the Phase-4 delete cascade (src/deletion.ts) to apply a planned
+ * region removal: detaching incoming and outgoing edges falls out of the
+ * removal naturally, so the cascade is just a loop of removeTaxonFixture
+ * calls over the region.
+ *
+ * Like attach/detachChildFixture, this performs NO domain validation —
+ * the deletion planner is responsible for §6.3 preconditions before any
+ * remove is applied.
+ */
+export function removeTaxonFixture(id: TaxonId): void {
+  const t = taxa.get(id);
+  if (t === undefined) return;
+  // Remove every incoming edge: for each parent that points at id, drop
+  // id from that parent's childIds.
+  const parents = parentsOf.get(id);
+  if (parents !== undefined) {
+    for (const pid of parents) {
+      const p = taxa.get(pid);
+      if (p !== undefined) p.childIds.delete(id);
+    }
+  }
+  // Remove every outgoing edge: for each child of id, drop id from that
+  // child's parents-of set (and clean up an emptied set).
+  for (const cid of t.childIds) {
+    const childParents = parentsOf.get(cid);
+    if (childParents !== undefined) {
+      childParents.delete(id);
+      if (childParents.size === 0) parentsOf.delete(cid);
+    }
+  }
+  // Finally drop the taxon and its parents-of entry.
+  parentsOf.delete(id);
+  taxa.delete(id);
+}
+
 // --- Reset -----------------------------------------------------------------
 
 export function clear(): void {

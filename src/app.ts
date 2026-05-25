@@ -5,7 +5,9 @@ import type { AppEnv } from "./identity.js";
 import { identityWithRegistry } from "./middleware/identity.js";
 import { readsRouter } from "./routes/reads.js";
 import { usersRouter } from "./routes/users.js";
+import { writesRouter } from "./routes/writes.js";
 import { resetAllState } from "./state.js";
+import { withWriteLock } from "./writeLock.js";
 
 export function createApp(): Hono<AppEnv> {
   const app = new Hono<AppEnv>();
@@ -18,8 +20,11 @@ export function createApp(): Hono<AppEnv> {
   // §15: fresh-boot state reset. Exempt from §4 — callable by null,
   // unregistered, AND malformed-header callers. Plug-in cleanups live in
   // state.ts (the registry registers its clear() there).
-  app.post("/reset", (c) => {
-    resetAllState();
+  //
+  // §15 also says reset "runs under the §11.1 write serialization", so we
+  // route it through the same write lock as every Phase-4 mutation.
+  app.post("/reset", async (c) => {
+    await withWriteLock(() => resetAllState());
     return c.body(null, 204);
   });
 
@@ -29,6 +34,10 @@ export function createApp(): Hono<AppEnv> {
   // §15.2 domain reads (taxa + trees). Identity gate applied inside the
   // sub-router; null users may read per §15.2.
   app.route("/", readsRouter);
+
+  // §15.3 direct actions (create / edit / delete / edge add / detach). All
+  // gates and the write lock live inside the sub-router.
+  app.route("/", writesRouter);
 
   app.notFound((c) =>
     httpError(c, "not_found", `no route matches ${c.req.method} ${new URL(c.req.url).pathname}`),
