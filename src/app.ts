@@ -3,6 +3,7 @@ import { Hono } from "hono";
 import { ApiError, errorBody, httpError, STATUS_BY_CODE } from "./errors.js";
 import type { AppEnv } from "./identity.js";
 import { identityWithRegistry } from "./middleware/identity.js";
+import { readsRouter } from "./routes/reads.js";
 import { usersRouter } from "./routes/users.js";
 import { resetAllState } from "./state.js";
 
@@ -24,6 +25,10 @@ export function createApp(): Hono<AppEnv> {
 
   // §15.1 user registry. Per-route middleware lives inside usersRouter.
   app.route("/", usersRouter);
+
+  // §15.2 domain reads (taxa + trees). Identity gate applied inside the
+  // sub-router; null users may read per §15.2.
+  app.route("/", readsRouter);
 
   app.notFound((c) =>
     httpError(c, "not_found", `no route matches ${c.req.method} ${new URL(c.req.url).pathname}`),
