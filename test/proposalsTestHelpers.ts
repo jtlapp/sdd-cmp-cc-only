@@ -129,6 +129,52 @@ export async function getQueue(app: App, caller: string | null) {
   return app.request("/queue", { headers });
 }
 
+export async function acceptChange(
+  app: App,
+  caller: string | null,
+  changeId: string,
+) {
+  const headers: Record<string, string> = {};
+  if (caller !== null) headers["X-Username"] = caller;
+  return app.request(`/changes/${changeId}/accept`, {
+    method: "POST",
+    headers,
+  });
+}
+
+export async function rejectChange(
+  app: App,
+  caller: string | null,
+  changeId: string,
+) {
+  const headers: Record<string, string> = {};
+  if (caller !== null) headers["X-Username"] = caller;
+  return app.request(`/changes/${changeId}/reject`, {
+    method: "POST",
+    headers,
+  });
+}
+
+/** Accepts a change and asserts 200. Returns the parsed body. */
+export async function acceptOk(app: App, caller: string, changeId: string) {
+  const res = await acceptChange(app, caller, changeId);
+  if (res.status !== 200) {
+    const text = await res.text();
+    assert.fail(`accept ${changeId} as ${caller} failed (${res.status}): ${text}`);
+  }
+  return (await res.json()) as { changeId: string; state: "accepted" };
+}
+
+/** Rejects a change and asserts 200. */
+export async function rejectOk(app: App, caller: string, changeId: string) {
+  const res = await rejectChange(app, caller, changeId);
+  if (res.status !== 200) {
+    const text = await res.text();
+    assert.fail(`reject ${changeId} as ${caller} failed (${res.status}): ${text}`);
+  }
+  return (await res.json()) as { changeId: string; state: "rejected" };
+}
+
 /** Submits a proposal and asserts it succeeded with 201. Returns the
  *  parsed response body. Most happy-path tests use this. */
 export async function submitOk(app: App, caller: string, body: unknown) {

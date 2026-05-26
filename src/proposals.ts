@@ -84,22 +84,38 @@ export interface Change {
    *  (create or graft). Equivalently: has a decision dependency.
    *  §11.3 says queued ⇔ this is false at submission. */
   readonly hasDecisionDepAncestor: boolean;
+  /** Change id of the **nearest** add/graft ancestor on the payload
+   *  path, or null if none. Used by Phase 6 promotion to find a change's
+   *  direct dependents: when add A is accepted, the changes promoted
+   *  are exactly those whose `nearestAddAncestorChangeId === A.id`. */
+  readonly nearestAddAncestorChangeId: ChangeId | null;
   /** For rename: the renamed taxon. For add-graft: the grafted taxon.
    *  For add-create: undefined. For detach: the detached taxon. */
   readonly taxonId?: TaxonId;
   /** For rename, add-create: the proposed name. */
   readonly name?: string;
   /** For add/detach: the parent taxon under which the op acts.
-   *  Undefined when the payload-parent is an add-create (id null),
-   *  which is unobservable in Phase 5 because such a change is always
-   *  latent and not surfaced via /queue. */
-  readonly payloadParentTaxonId?: TaxonId;
+   *  Undefined when the payload-parent is an add-create (id null) AND
+   *  that add-create hasn't been accepted yet. When the parent
+   *  add-create is accepted (Phase 6 promotion), the newly-minted
+   *  taxon id is patched in here so routing can be resolved. */
+  payloadParentTaxonId?: TaxonId;
   /** The target tree's root id. Echoed for /queue convenience. */
   readonly targetRootId: TaxonId;
   /** The reviewer per §10.1 (canonical username) for QUEUED changes.
    *  null for latent in Phase 5 — promotion (Phase 6) resolves it. */
   reviewer: string | null;
   state: ChangeState;
+  /** Set after acceptance. For add-create, the newly-minted taxon's id;
+   *  for add-graft / rename / detach, equals the pre-existing taxon id
+   *  this change refers to. Lets Phase 6's promotion walk recover the
+   *  live id of an accepted add-create when resolving downstream
+   *  routing or existence-dep checks. */
+  liveTaxonId?: TaxonId;
+  /** §11.5 reason on negative states (rejected / invalid). Phase 6
+   *  populates this only for the `invalid` state (rejection-propagation
+   *  cause, or promotion-time existence-dep failure). */
+  reason?: string;
 }
 
 export interface Proposal {
@@ -110,6 +126,11 @@ export interface Proposal {
   readonly payload: PayloadNode;
   /** Keyed by change id, iteration order = creation order. */
   readonly changes: Map<ChangeId, Change>;
+  /** Every payload node in the proposal, keyed by its internalId.
+   *  Built once at submission so Phase-6 promotion can walk the
+   *  payload subtree below an accepted change without re-traversing
+   *  the whole payload. */
+  readonly nodesByInternalId: Map<InternalNodeId, PayloadNode>;
 }
 
 /** §15.6 maps each of these to its HTTP status the same way the rest of
@@ -179,9 +200,39 @@ export function queuedChangesFor(reviewer: string): Change[] {
   const out: Change[] = [];
   for (const id of ids) {
     const c = changeIndex.get(id);
-    if (c !== undefined) out.push(c);
+    // Defensive: a change in the queue list whose state has drifted off
+    // "queued" (e.g. invalidated via rejection-propagation in Phase 6)
+    // is filtered here rather than relying on every mutation path to
+    // also splice the list. The mutators below DO splice on transition,
+    // so this is belt-and-suspenders.
+    if (c !== undefined && c.state === "queued") out.push(c);
   }
   return out;
+}
+
+/** Lookup by change id. Returns undefined for unknown ids. */
+export function getChange(id: ChangeId): Change | undefined {
+  return changeIndex.get(id);
+}
+
+/** Append `changeId` to `reviewer`'s queue if not already present.
+ *  Used by Phase 6 promotion to enqueue a newly-promoted change. */
+export function enqueueChange(changeId: ChangeId, reviewer: string): void {
+  let q = queuesByReviewer.get(reviewer);
+  if (q === undefined) {
+    q = [];
+    queuesByReviewer.set(reviewer, q);
+  }
+  if (!q.includes(changeId)) q.push(changeId);
+}
+
+/** Remove `changeId` from `reviewer`'s queue if present. No-op otherwise.
+ *  Used by Phase 6 accept/reject/invalidation to dequeue. */
+export function dequeueChange(changeId: ChangeId, reviewer: string): void {
+  const q = queuesByReviewer.get(reviewer);
+  if (q === undefined) return;
+  const i = q.indexOf(changeId);
+  if (i >= 0) q.splice(i, 1);
 }
 
 // --- Submission entry point ------------------------------------------------
@@ -245,16 +296,18 @@ export function submitProposal(
   // 7) Derive changes + dispositions + reviewers.
   const proposalId = nextProposalId();
   const changes = new Map<ChangeId, Change>();
+  const nodesByInternalId = new Map<InternalNodeId, PayloadNode>();
   const queuedReviewers: { reviewer: string; changeId: ChangeId }[] = [];
   deriveChanges(
     payload,
     /*payloadPath=*/ [],
-    /*ancestorHasAdd=*/ false,
+    /*nearestAddAncestorChangeId=*/ null,
     /*payloadParentTaxonId=*/ undefined,
     proposalId,
     targetRootId,
     state,
     changes,
+    nodesByInternalId,
     queuedReviewers,
   );
 
@@ -266,6 +319,7 @@ export function submitProposal(
     topTaxonId,
     payload,
     changes,
+    nodesByInternalId,
   };
   proposals.set(proposalId, proposal);
   for (const c of changes.values()) {
@@ -503,15 +557,18 @@ function isInTree(
 function deriveChanges(
   node: PayloadNode,
   ancestorPath: InternalNodeId[],
-  ancestorHasAdd: boolean,
+  nearestAddAncestorChangeId: ChangeId | null,
   payloadParentTaxonId: TaxonId | undefined,
   proposalId: ProposalId,
   targetRootId: TaxonId,
   state: TaxonState,
   changes: Map<ChangeId, Change>,
+  nodesByInternalId: Map<InternalNodeId, PayloadNode>,
   queuedReviewers: { reviewer: string; changeId: ChangeId }[],
 ): void {
+  nodesByInternalId.set(node.internalId, node);
   const pathHere = [...ancestorPath, node.internalId];
+  const ancestorHasAdd = nearestAddAncestorChangeId !== null;
 
   if (node.op !== "no-op") {
     const changeId = nextChangeId();
@@ -531,17 +588,11 @@ function deriveChanges(
         // Renamed taxon is guaranteed to exist (existence check above).
         taxonIdField = node.id ?? undefined;
         nameField = node.name;
-        if (!isLatent) {
-          const t = state.taxa.get(node.id as TaxonId);
-          // Existence check above guarantees t is defined.
-          if (t !== undefined) reviewer = t.owner;
-        } else {
-          // Even latent renames have a well-known reviewer (the renamed
-          // taxon's owner). Record it for completeness, though Phase 5
-          // does not surface it via /queue.
-          const t = state.taxa.get(node.id as TaxonId);
-          if (t !== undefined) reviewer = t.owner;
-        }
+        // Even latent renames have a well-known reviewer (the renamed
+        // taxon's owner) — recorded at submission. Phase 6 promotion
+        // uses it as-is.
+        const t = state.taxa.get(node.id as TaxonId);
+        if (t !== undefined) reviewer = t.owner;
         break;
       }
       case "add": {
@@ -554,12 +605,13 @@ function deriveChanges(
           // graft: existing taxon id (the grafted taxon).
           taxonIdField = node.id;
         }
-        if (!isLatent && payloadParentTaxonId !== undefined) {
+        if (payloadParentTaxonId !== undefined) {
           const p = state.taxa.get(payloadParentTaxonId);
           if (p !== undefined) reviewer = p.owner;
         }
-        // Latent add whose payload-parent is an add-create: reviewer
-        // stays null (deferred to promotion in Phase 6).
+        // Latent add whose payload-parent is an add-create:
+        // payloadParentTaxonId is undefined here; the live id of the
+        // newly-created parent is patched in at promotion time.
         break;
       }
       case "detach": {
@@ -567,7 +619,7 @@ function deriveChanges(
         // taxon (the detached child) is named by node.id.
         taxonIdField = node.id ?? undefined;
         parentTaxonField = payloadParentTaxonId;
-        if (!isLatent && payloadParentTaxonId !== undefined) {
+        if (payloadParentTaxonId !== undefined) {
           const p = state.taxa.get(payloadParentTaxonId);
           if (p !== undefined) reviewer = p.owner;
         }
@@ -581,6 +633,7 @@ function deriveChanges(
       op: node.op,
       payloadPath: pathHere,
       hasDecisionDepAncestor: ancestorHasAdd,
+      nearestAddAncestorChangeId,
       taxonId: taxonIdField,
       name: nameField,
       payloadParentTaxonId: parentTaxonField,
@@ -597,8 +650,10 @@ function deriveChanges(
   // Recurse. The payload-parent taxon for the NEXT level is:
   //   - this node's id, if known (no-op, rename, detach, add-graft);
   //   - undefined, if this is an add-create (no live taxon to anchor on).
-  // The "ancestor has add" flag propagates downward, sticky.
-  const childAncestorHasAdd = ancestorHasAdd || node.op === "add";
+  // The "nearest add ancestor" updates to this node's changeId if this
+  // is an add (create or graft); otherwise it propagates unchanged.
+  const childNearestAdd: ChangeId | null =
+    node.op === "add" ? (node.changeId as ChangeId) : nearestAddAncestorChangeId;
   const childParentTaxon: TaxonId | undefined =
     node.id !== null ? node.id : undefined;
 
@@ -606,12 +661,13 @@ function deriveChanges(
     deriveChanges(
       child,
       pathHere,
-      childAncestorHasAdd,
+      childNearestAdd,
       childParentTaxon,
       proposalId,
       targetRootId,
       state,
       changes,
+      nodesByInternalId,
       queuedReviewers,
     );
   }
@@ -661,17 +717,21 @@ export interface StatusNode {
 }
 
 export function renderStatusTree(payload: PayloadNode, p: Proposal): StatusNode {
+  const change = payload.op === "no-op"
+    ? undefined
+    : p.changes.get(payload.changeId as ChangeId);
   const node: StatusNode = {
     op: payload.op,
     id: payload.id,
     disposition: payload.op === "no-op"
       ? "structural"
-      : (p.changes.get(payload.changeId as ChangeId)?.state ?? "queued"),
+      : (change?.state ?? "queued"),
   };
   if (payload.name !== undefined) node.name = payload.name;
   if (payload.op !== "no-op" && payload.changeId !== undefined) {
     node.changeId = payload.changeId;
   }
+  if (change?.reason !== undefined) node.reason = change.reason;
   if (payload.children.length > 0) {
     node.children = payload.children.map((c) => renderStatusTree(c, p));
   }

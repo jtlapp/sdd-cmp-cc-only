@@ -156,6 +156,68 @@ test("write serialization: two POST /proposals fired in the same tick produce or
   assert.equal(cNums[1]! + 1, cNums[2]!);
 });
 
+test("write serialization: two POST /changes/.../accept fired in the same tick are serialized, both reflected in live state", async () => {
+  const app = await freshApp();
+  // Build a state where two independent renames both validate. Alice
+  // owns root and two leaf children with distinct, non-clashing names.
+  const root = (await (await postTaxa(app, "Alice", "Fiction")).json()) as TaxonRecord;
+  const c1 = (await (await postTaxa(app, "Alice", "Fantasy")).json()) as TaxonRecord;
+  const c2 = (await (await postTaxa(app, "Alice", "Mystery")).json()) as TaxonRecord;
+  await app.request(`/taxa/${root.id}/children/${c1.id}`, {
+    method: "PUT",
+    headers: { "X-Username": "Alice" },
+  });
+  await app.request(`/taxa/${root.id}/children/${c2.id}`, {
+    method: "PUT",
+    headers: { "X-Username": "Alice" },
+  });
+
+  // Submit two separate proposals, each with one rename.
+  async function submit(taxonId: string, name: string) {
+    return app.request("/proposals", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "X-Username": "Alice" },
+      body: JSON.stringify({
+        targetRootId: root.id,
+        topTaxonId: root.id,
+        payload: {
+          op: "no-op",
+          id: root.id,
+          children: [{ op: "rename", id: taxonId, name }],
+        },
+      }),
+    });
+  }
+  const p1 = (await (await submit(c1.id, "Epic Fantasy")).json()) as {
+    payload: { children: { changeId: string }[] };
+  };
+  const p2 = (await (await submit(c2.id, "Crime Mystery")).json()) as {
+    payload: { children: { changeId: string }[] };
+  };
+  const cId1 = p1.payload.children[0]!.changeId;
+  const cId2 = p2.payload.children[0]!.changeId;
+
+  // Dispatch both accepts in the same tick.
+  const [a1, a2] = await Promise.all([
+    app.request(`/changes/${cId1}/accept`, {
+      method: "POST",
+      headers: { "X-Username": "Alice" },
+    }),
+    app.request(`/changes/${cId2}/accept`, {
+      method: "POST",
+      headers: { "X-Username": "Alice" },
+    }),
+  ]);
+  assert.equal(a1.status, 200);
+  assert.equal(a2.status, 200);
+
+  // Both renames reflected in live state.
+  const c1After = (await (await app.request(`/taxa/${c1.id}`)).json()) as TaxonRecord;
+  const c2After = (await (await app.request(`/taxa/${c2.id}`)).json()) as TaxonRecord;
+  assert.equal(c1After.name, "Epic Fantasy");
+  assert.equal(c2After.name, "Crime Mystery");
+});
+
 test("write serialization: a parent-add and a follow-up read see the consistent post-write state", async () => {
   const app = await freshApp();
   const root = (await (await postTaxa(app, "Alice", "Root")).json()) as TaxonRecord;

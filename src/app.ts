@@ -6,6 +6,7 @@ import { identityWithRegistry } from "./middleware/identity.js";
 import { proposalsRouter } from "./routes/proposals.js";
 import { queueRouter } from "./routes/queue.js";
 import { readsRouter } from "./routes/reads.js";
+import { reviewsRouter } from "./routes/reviews.js";
 import { usersRouter } from "./routes/users.js";
 import { writesRouter } from "./routes/writes.js";
 import { resetAllState } from "./state.js";
@@ -47,6 +48,10 @@ export function createApp(): Hono<AppEnv> {
 
   // §15.2 GET /queue — caller's currently queued changes.
   app.route("/", queueRouter);
+
+  // §15.5 review actions — POST /changes/{id}/accept and /reject. Gates
+  // and the write lock live inside the sub-router.
+  app.route("/", reviewsRouter);
 
   app.notFound((c) =>
     httpError(c, "not_found", `no route matches ${c.req.method} ${new URL(c.req.url).pathname}`),
