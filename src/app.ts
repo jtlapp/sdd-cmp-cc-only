@@ -3,6 +3,8 @@ import { Hono } from "hono";
 import { ApiError, errorBody, httpError, STATUS_BY_CODE } from "./errors.js";
 import type { AppEnv } from "./identity.js";
 import { identityWithRegistry } from "./middleware/identity.js";
+import { proposalsRouter } from "./routes/proposals.js";
+import { queueRouter } from "./routes/queue.js";
 import { readsRouter } from "./routes/reads.js";
 import { usersRouter } from "./routes/users.js";
 import { writesRouter } from "./routes/writes.js";
@@ -38,6 +40,13 @@ export function createApp(): Hono<AppEnv> {
   // §15.3 direct actions (create / edit / delete / edge add / detach). All
   // gates and the write lock live inside the sub-router.
   app.route("/", writesRouter);
+
+  // §15.4 proposal submission + §15.2 proposal reads. Identity gates and
+  // the write lock live inside the sub-router.
+  app.route("/", proposalsRouter);
+
+  // §15.2 GET /queue — caller's currently queued changes.
+  app.route("/", queueRouter);
 
   app.notFound((c) =>
     httpError(c, "not_found", `no route matches ${c.req.method} ${new URL(c.req.url).pathname}`),

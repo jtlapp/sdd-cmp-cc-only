@@ -108,6 +108,54 @@ test("write serialization: POST /reset runs under the lock (§15) — writes bef
   assert.equal(body.id, "t1", "reset must restart the ID counter");
 });
 
+test("write serialization: two POST /proposals fired in the same tick produce ordered proposal+change ids", async () => {
+  const app = await freshApp();
+  // Alice owns the target root; the proposal is a trivial no-op + create,
+  // submitted by Alice (self-routed) for simplicity.
+  const root = (await (await postTaxa(app, "Alice", "Fiction")).json()) as TaxonRecord;
+  const body = JSON.stringify({
+    targetRootId: root.id,
+    topTaxonId: root.id,
+    payload: {
+      op: "no-op",
+      id: root.id,
+      children: [{ op: "add", id: null, name: "X" }],
+    },
+  });
+  // Dispatch three in the same tick.
+  const [r1, r2, r3] = await Promise.all([
+    app.request("/proposals", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "X-Username": "Alice" },
+      body,
+    }),
+    app.request("/proposals", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "X-Username": "Alice" },
+      body,
+    }),
+    app.request("/proposals", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "X-Username": "Alice" },
+      body,
+    }),
+  ]);
+  assert.equal(r1.status, 201);
+  assert.equal(r2.status, 201);
+  assert.equal(r3.status, 201);
+  const p1 = (await r1.json()) as { id: string; payload: { children: { changeId: string }[] } };
+  const p2 = (await r2.json()) as { id: string; payload: { children: { changeId: string }[] } };
+  const p3 = (await r3.json()) as { id: string; payload: { children: { changeId: string }[] } };
+  // Proposal ids monotonic.
+  const pNums = [p1.id, p2.id, p3.id].map((s) => Number(s.slice(1)));
+  assert.equal(pNums[0]! + 1, pNums[1]!);
+  assert.equal(pNums[1]! + 1, pNums[2]!);
+  // Change ids monotonic (and queue order matches).
+  const cNums = [p1, p2, p3].map((p) => Number(p.payload.children[0]!.changeId.slice(1)));
+  assert.equal(cNums[0]! + 1, cNums[1]!);
+  assert.equal(cNums[1]! + 1, cNums[2]!);
+});
+
 test("write serialization: a parent-add and a follow-up read see the consistent post-write state", async () => {
   const app = await freshApp();
   const root = (await (await postTaxa(app, "Alice", "Root")).json()) as TaxonRecord;
