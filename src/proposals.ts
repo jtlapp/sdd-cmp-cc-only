@@ -226,6 +226,28 @@ export function enqueueChange(changeId: ChangeId, reviewer: string): void {
   if (!q.includes(changeId)) q.push(changeId);
 }
 
+/** Insert `changeId` at the given index in `reviewer`'s queue. Used by
+ *  Phase 7 cascade rollback to restore a dequeued change to its
+ *  original position. If index is negative or beyond current length,
+ *  appends. No-op if already in the queue. */
+export function enqueueChangeAt(
+  changeId: ChangeId,
+  reviewer: string,
+  index: number,
+): void {
+  let q = queuesByReviewer.get(reviewer);
+  if (q === undefined) {
+    q = [];
+    queuesByReviewer.set(reviewer, q);
+  }
+  if (q.includes(changeId)) return;
+  if (index < 0 || index >= q.length) {
+    q.push(changeId);
+  } else {
+    q.splice(index, 0, changeId);
+  }
+}
+
 /** Remove `changeId` from `reviewer`'s queue if present. No-op otherwise.
  *  Used by Phase 6 accept/reject/invalidation to dequeue. */
 export function dequeueChange(changeId: ChangeId, reviewer: string): void {
@@ -233,6 +255,23 @@ export function dequeueChange(changeId: ChangeId, reviewer: string): void {
   if (q === undefined) return;
   const i = q.indexOf(changeId);
   if (i >= 0) q.splice(i, 1);
+}
+
+/** Index of `changeId` in `reviewer`'s queue, or -1 if not present.
+ *  Used by Phase 7 cascade rollback to record original positions and
+ *  by dismiss to verify queue membership. */
+export function indexInQueue(changeId: ChangeId, reviewer: string): number {
+  const q = queuesByReviewer.get(reviewer);
+  if (q === undefined) return -1;
+  return q.indexOf(changeId);
+}
+
+/** Raw queue ids (no state-filtering). Used by Phase 7 lazy
+ *  re-validation to walk the queue including invalid-pending-dismiss
+ *  entries. */
+export function queuedChangeIdsFor(reviewer: string): ChangeId[] {
+  const ids = queuesByReviewer.get(reviewer);
+  return ids === undefined ? [] : ids.slice();
 }
 
 // --- Submission entry point ------------------------------------------------

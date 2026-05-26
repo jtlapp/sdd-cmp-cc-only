@@ -218,6 +218,75 @@ test("write serialization: two POST /changes/.../accept fired in the same tick a
   assert.equal(c2After.name, "Crime Mystery");
 });
 
+test("write serialization: two POST /changes/.../accept-cascade fired in the same tick serialize cleanly", async () => {
+  // Phase 7 — accept-cascade also runs under the §11.1 write lock.
+  // Two reviewers issuing concurrent cascades should serialize without
+  // corrupting state or each other's audit logs.
+  const app = await freshApp();
+  await app.request("/users", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ username: "Bob" }),
+  });
+  await app.request("/users", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ username: "Carol" }),
+  });
+  const r1 = (await (await postTaxa(app, "Alice", "Root1")).json()) as TaxonRecord;
+  const r2 = (await (await postTaxa(app, "Bob", "Root2")).json()) as TaxonRecord;
+
+  async function submitFor(caller: string, target: string, opName: string) {
+    return app.request("/proposals", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "X-Username": "Carol" },
+      body: JSON.stringify({
+        targetRootId: target,
+        topTaxonId: target,
+        payload: {
+          op: "no-op",
+          id: target,
+          children: [
+            {
+              op: "add",
+              id: null,
+              name: `${opName}-outer`,
+              children: [{ op: "add", id: null, name: `${opName}-inner` }],
+            },
+          ],
+        },
+      }),
+    });
+  }
+  const p1 = (await (await submitFor("Carol", r1.id, "P1")).json()) as {
+    payload: { children: { changeId: string }[] };
+  };
+  const p2 = (await (await submitFor("Carol", r2.id, "P2")).json()) as {
+    payload: { children: { changeId: string }[] };
+  };
+  const seed1 = p1.payload.children[0]!.changeId;
+  const seed2 = p2.payload.children[0]!.changeId;
+
+  // Dispatch both cascade requests in the same tick.
+  const [c1, c2] = await Promise.all([
+    app.request(`/changes/${seed1}/accept-cascade`, {
+      method: "POST",
+      headers: { "X-Username": "Alice" },
+    }),
+    app.request(`/changes/${seed2}/accept-cascade`, {
+      method: "POST",
+      headers: { "X-Username": "Bob" },
+    }),
+  ]);
+  assert.equal(c1.status, 200);
+  assert.equal(c2.status, 200);
+
+  const r1After = (await (await app.request(`/taxa/${r1.id}`)).json()) as TaxonRecord;
+  const r2After = (await (await app.request(`/taxa/${r2.id}`)).json()) as TaxonRecord;
+  assert.equal(r1After.childIds.length, 1);
+  assert.equal(r2After.childIds.length, 1);
+});
+
 test("write serialization: a parent-add and a follow-up read see the consistent post-write state", async () => {
   const app = await freshApp();
   const root = (await (await postTaxa(app, "Alice", "Root")).json()) as TaxonRecord;

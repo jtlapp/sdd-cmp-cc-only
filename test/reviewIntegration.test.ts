@@ -17,6 +17,7 @@ import {
   listProposals,
   QueueEntry,
   register,
+  rejectChange,
   rejectOk,
   submitOk,
   type App,
@@ -261,7 +262,12 @@ test("Appendix A.2: graft accept + detach reject leaves taxon shared across tree
 
 // --- Acceptance failure does not leave residue ----------------------------
 
-test("failed accept does not mutate live state; subsequent reject succeeds", async () => {
+test("failed accept does not mutate live state; change transitions to invalid (§11.4 case 2)", async () => {
+  // Phase 7 replaces Phase 6's placeholder: failed accept now
+  // auto-dismisses the change (case 2). Live state remains byte-equal
+  // to pre-call. A subsequent reject is therefore a no-op on a
+  // non-queued change — returns 409 change_not_queued with state
+  // "invalid".
   const app = await freshApp();
   await register(app, "alice");
   await register(app, "bob");
@@ -287,14 +293,23 @@ test("failed accept does not mutate live state; subsequent reject succeeds", asy
   assert.equal(fail.status, 409);
   const failBody = (await fail.json()) as ErrorBody;
   assert.equal(failBody.error.code, "conflict");
+  assert.equal(failBody.error.details?.kind, "name_clash");
 
   // State unchanged.
   assert.equal((await getTaxonRecord(app, mystery)).name, "Mystery");
 
-  // Now reject → succeeds.
-  await rejectOk(app, "alice", changeId);
+  // Change is auto-dismissed (case 2): invalid + gone from Alice's queue.
   const status = walkStatusNodes(await statusFor(app, sub.id));
-  assert.equal(status.find((n) => n.changeId === changeId)?.disposition, "rejected");
+  assert.equal(status.find((n) => n.changeId === changeId)?.disposition, "invalid");
+  const aliceQ = await queueOf(app, "alice");
+  assert.ok(!aliceQ.some((e) => e.changeId === changeId));
+
+  // Subsequent reject attempt returns 409 (change no longer queued).
+  const rejectRes = await rejectChange(app, "alice", changeId);
+  assert.equal(rejectRes.status, 409);
+  const rejectBody = (await rejectRes.json()) as ErrorBody;
+  assert.equal(rejectBody.error.details?.kind, "change_not_queued");
+  assert.equal(rejectBody.error.details?.state, "invalid");
 });
 
 // --- Cross-tree shared-taxon rename -----------------------------------------

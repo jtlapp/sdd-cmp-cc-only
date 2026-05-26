@@ -175,6 +175,63 @@ export async function rejectOk(app: App, caller: string, changeId: string) {
   return (await res.json()) as { changeId: string; state: "rejected" };
 }
 
+export async function acceptCascade(
+  app: App,
+  caller: string | null,
+  changeId: string,
+) {
+  const headers: Record<string, string> = {};
+  if (caller !== null) headers["X-Username"] = caller;
+  return app.request(`/changes/${changeId}/accept-cascade`, {
+    method: "POST",
+    headers,
+  });
+}
+
+export async function acceptCascadeOk(
+  app: App,
+  caller: string,
+  changeId: string,
+) {
+  const res = await acceptCascade(app, caller, changeId);
+  if (res.status !== 200) {
+    const text = await res.text();
+    assert.fail(
+      `accept-cascade ${changeId} as ${caller} failed (${res.status}): ${text}`,
+    );
+  }
+  return (await res.json()) as {
+    rootChangeId: string;
+    acceptedChangeIds: string[];
+  };
+}
+
+export async function dismiss(
+  app: App,
+  caller: string | null,
+  changeId: string,
+) {
+  const headers: Record<string, string> = {};
+  if (caller !== null) headers["X-Username"] = caller;
+  return app.request(`/changes/${changeId}/dismiss`, {
+    method: "POST",
+    headers,
+  });
+}
+
+export async function dismissOk(app: App, caller: string, changeId: string) {
+  const res = await dismiss(app, caller, changeId);
+  if (res.status !== 200) {
+    const text = await res.text();
+    assert.fail(`dismiss ${changeId} as ${caller} failed (${res.status}): ${text}`);
+  }
+  return (await res.json()) as {
+    changeId: string;
+    state: "invalid";
+    dismissed: true;
+  };
+}
+
 /** Submits a proposal and asserts it succeeded with 201. Returns the
  *  parsed response body. Most happy-path tests use this. */
 export async function submitOk(app: App, caller: string, body: unknown) {
@@ -209,7 +266,10 @@ export interface QueueEntry {
   proposalId: string;
   op: "rename" | "add" | "detach";
   targetRootId: string;
-  state: "queued";
+  /** §15.2: queue includes the `invalid–awaiting-dismiss` sub-state in
+   *  Phase 7 (case-3 external invalidation, §11.4). Other states never
+   *  sit in any queue. */
+  state: "queued" | "invalid";
   taxonId?: string;
   name?: string;
   payloadParentTaxonId?: string;

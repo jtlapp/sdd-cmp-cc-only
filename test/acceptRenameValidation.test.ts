@@ -1,7 +1,10 @@
-// Phase-6 §10.3 acceptance-time validation for renames — verifies the
-// invariant module is invoked over the FULL containing tree(s), not just
-// the target tree. Phase 6 decision #10 (no mutation on failed accept)
-// is asserted by reading state before and after a failing accept.
+// §10.3 acceptance-time validation for renames — verifies the
+// invariant module is invoked over the FULL containing tree(s), not
+// just the target tree. (Updated in Phase 7: the failed-accept path
+// now transitions the change to `invalid` per §11.4 case 2, replacing
+// Phase 6's "stays queued" placeholder. Live state is still byte-equal
+// to its pre-call value on a failed accept — only the change record
+// transitions.)
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
@@ -41,7 +44,7 @@ async function getStatusDisp(app: App, proposalId: string, changeId: string) {
   return walk(body.payload);
 }
 
-test("rename to a name that clashes in the target tree → 409 conflict, change stays queued", async () => {
+test("rename to a name that clashes in the target tree → 409 conflict, change auto-dismissed (§11.4 case 2)", async () => {
   const app = await freshApp();
   await register(app, "alice");
   await register(app, "bob");
@@ -74,10 +77,10 @@ test("rename to a name that clashes in the target tree → 409 conflict, change 
   assert.equal(body.error.details?.kind, "name_clash");
   assert.equal(body.error.details?.rootId, r1);
 
-  // Mystery's name is unchanged.
+  // Mystery's name is unchanged — live state byte-equal to pre-call.
   assert.equal((await getTaxonRecord(app, mystery)).name, beforeMystery);
-  // Change is still queued (Phase 6 decision #2).
-  assert.equal(await getStatusDisp(app, sub.id, changeId), "queued");
+  // §11.4 case 2: change is auto-dismissed (state=invalid, dequeued).
+  assert.equal(await getStatusDisp(app, sub.id, changeId), "invalid");
 });
 
 test("rename clashes in ANOTHER containing tree (not the target) → 409 conflict", async () => {
